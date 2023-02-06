@@ -22,6 +22,7 @@
 - recvmsg is a very *stupid* copy of the sendmsg fn, **EXPECT ERRORS** (if used outside libipc)
 - at least one memory error when using Cmsghdr (see below)
 
+```
 	==32374== Syscall param sendmsg(msg.msg_control) points to uninitialised byte(s)
 	==32374==    at 0x40554A3: ??? (in /lib/ld-musl-x86_64.so.1)
 	==32374==    by 0x40526F9: ??? (in /lib/ld-musl-x86_64.so.1)
@@ -36,3 +37,4 @@
 	==32374==    by 0x28161E: initEventLoopAndCallMain (start.zig:548)
 	==32374==    by 0x28161E: callMainWithArgs (start.zig:498)
 	==32374==    by 0x28161E: main (start.zig:513)
+```
