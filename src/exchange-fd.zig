@@ -88,7 +88,7 @@ pub fn send_fd(sockfd: os.socket_t, msg: []const u8, fd: os.fd_t) void {
         .data = fd,
     });
 
-    const len = os.sendmsg(sockfd, .{
+    const len = os.sendmsg(sockfd, &std.os.msghdr_const{
         .name = null,
         .namelen = 0,
         .iov = &iov,
