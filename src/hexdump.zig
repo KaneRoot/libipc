@@ -1,9 +1,9 @@
 const std = @import("std");
 
-pub fn hexdump(stream: anytype, header: [] const u8, buffer: [] const u8) std.os.WriteError!void {
+pub fn hexdump(stream: anytype, header: []const u8, buffer: []const u8) std.os.WriteError!void {
     // Print a header.
     if (header.len > 0) {
-        var hdr: [64] u8 = undefined;
+        var hdr: [64]u8 = undefined;
         var offset: usize = (hdr.len / 2) - ((header.len / 2) - 1);
 
         std.mem.set(u8, hdr[0..hdr.len], ' ');
@@ -14,15 +14,15 @@ pub fn hexdump(stream: anytype, header: [] const u8, buffer: [] const u8) std.os
     }
 
     var hexb: u32 = 0;
-    var ascii: [16] u8 = undefined;
+    var ascii: [16]u8 = undefined;
     // First line, first left side (simple number).
-    try stream.print("\n  {d:0>4}:  ", .{ hexb });
+    try stream.print("\n  {d:0>4}:  ", .{hexb});
 
     // Loop on all values in the buffer (i from 0 to buffer.len).
     var i: u32 = 0;
     while (i < buffer.len) : (i += 1) {
         // Print actual hexadecimal value.
-        try stream.print("{X:0>2} ", .{ buffer[i] });
+        try stream.print("{X:0>2} ", .{buffer[i]});
 
         // What to print (simple ascii text, right side).
         if (buffer[i] >= ' ' and buffer[i] <= '~') {
@@ -39,9 +39,11 @@ pub fn hexdump(stream: anytype, header: [] const u8, buffer: [] const u8) std.os
         // No next input: print the right amount of spaces.
         if ((i + 1) == buffer.len) {
             // Each line is 16 bytes to print, each byte takes 3 characters.
-            var missing_spaces = 3 * (15 - (i%16));
+            var missing_spaces = 3 * (15 - (i % 16));
             // Missing an extra space if the current index % 16 is less than 7.
-            if ((i%16) < 7) { missing_spaces += 1; }
+            if ((i % 16) < 7) {
+                missing_spaces += 1;
+            }
             while (missing_spaces > 0) : (missing_spaces -= 1) {
                 try stream.writeAll(" ");
             }
@@ -51,17 +53,17 @@ pub fn hexdump(stream: anytype, header: [] const u8, buffer: [] const u8) std.os
 
         // Case 1: it's been 16 bytes AND it's the last byte to print.
         if ((i + 1) % 16 == 0 and (i + 1) == buffer.len) {
-            try stream.print("{s}\n", .{ ascii[0..ascii.len] });
+            try stream.print("{s}\n", .{ascii[0..ascii.len]});
         }
         // Case 2: it's been 16 bytes but it's not the end of the buffer.
         else if ((i + 1) % 16 == 0 and (i + 1) != buffer.len) {
-            try stream.print("{s}\n", .{ ascii[0..ascii.len] });
+            try stream.print("{s}\n", .{ascii[0..ascii.len]});
             hexb += 16;
-            try stream.print("  {d:0>4}:  ", .{ hexb });
+            try stream.print("  {d:0>4}:  ", .{hexb});
         }
         // Case 3: not the end of the 16 bytes row but it's the end of the buffer.
         else if ((i + 1) % 16 != 0 and (i + 1) == buffer.len) {
-            try stream.print(" {s}\n", .{ ascii[0..((i+1) % 16)] });
+            try stream.print(" {s}\n", .{ascii[0..((i + 1) % 16)]});
         }
         // Case 4: not the end of the 16 bytes row and not the end of the buffer.
         //         Do nothing.

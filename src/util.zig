@@ -9,13 +9,12 @@ const Message = @import("./message.zig").Message;
 /// DO NOT USE IT UNLESS YOU KNOW WHAT TO EXPECT.
 pub const URI = struct {
     protocol: []const u8,
-    address:  []const u8,
-    path:     []const u8,
+    address: []const u8,
+    path: []const u8,
 
     const Self = @This();
 
     pub fn read(uri_to_decode: []const u8) Self {
-
         var protocolit = std.mem.split(u8, uri_to_decode, "://");
         var protocol = protocolit.first();
 
@@ -24,9 +23,7 @@ pub const URI = struct {
 
         var path = addressit.rest();
 
-        return Self { .protocol = protocol
-            , .address = address
-            , .path = path };
+        return Self{ .protocol = protocol, .address = address, .path = path };
     }
 };
 
@@ -37,7 +34,7 @@ test "URI simple decoding" {
     try testing.expectEqualSlices(u8, uri.path, "some-path");
 }
 
-pub fn print_buffer (header: []const u8, buffer: []const u8) void {
+pub fn print_buffer(header: []const u8, buffer: []const u8) void {
     var hexbuf: [4000]u8 = undefined;
     var hexfbs = std.io.fixedBufferStream(&hexbuf);
     var hexwriter = hexfbs.writer();
@@ -45,8 +42,8 @@ pub fn print_buffer (header: []const u8, buffer: []const u8) void {
     log.debug("{s}", .{hexfbs.getWritten()});
 }
 
-pub fn print_message (header: []const u8, m: Message) void {
-   print_buffer (header, m.payload);
+pub fn print_message(header: []const u8, m: Message) void {
+    print_buffer(header, m.payload);
 }
 
 pub fn print_eq(expected: anytype, obj: anytype) !void {

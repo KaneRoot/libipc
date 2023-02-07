@@ -34,26 +34,31 @@ pub const Event = struct {
     //    to it. This is a lookup.
 
     pub const Type = enum {
-        ERROR,         // A problem occured.
-        CONNECTION,    // New user.
+        ERROR, // A problem occured.
+        CONNECTION, // New user.
         DISCONNECTION, // User disconnected.
-        MESSAGE_RX,    // New message.
-        MESSAGE_TX,    // Message sent.
-        TIMER,         // Timeout in the poll(2) function.
-        EXTERNAL,      // Message received from a non IPC socket.
-        SWITCH_RX,     // Message received from a switched FD.
-        SWITCH_TX,     // Message sent to a switched fd.
+        MESSAGE_RX, // New message.
+        MESSAGE_TX, // Message sent.
+        TIMER, // Timeout in the poll(2) function.
+        EXTERNAL, // Message received from a non IPC socket.
+        SWITCH_RX, // Message received from a switched FD.
+        SWITCH_TX, // Message sent to a switched fd.
     };
 
     t: Event.Type,
     index: usize,
     origin: i32, // socket fd
-    m: ?Message,  // message
+    m: ?Message, // message
 
     const Self = @This();
 
     pub fn init(t: Event.Type, index: usize, origin: i32, m: ?Message) Self {
-        return Self { .t = t, .index = index, .origin = origin, .m = m, };
+        return Self{
+            .t = t,
+            .index = index,
+            .origin = origin,
+            .m = m,
+        };
     }
 
     pub fn set(self: *Self, t: Event.Type, index: usize, origin: i32, m: ?Message) void {
@@ -65,8 +70,8 @@ pub const Event = struct {
 
     pub fn clean(self: *Self) void {
         self.t = Event.Type.ERROR;
-        self.index = @as(usize,0);
-        self.origin = @as(i32,0);
+        self.index = @as(usize, 0);
+        self.origin = @as(i32, 0);
         if (self.m) |message| {
             message.deinit();
         }
@@ -74,15 +79,12 @@ pub const Event = struct {
     }
 
     pub fn format(self: Self, comptime _: []const u8, _: fmt.FormatOptions, out_stream: anytype) !void {
-        try fmt.format(out_stream
-            , "{}, origin: {}, index {}, message: [{?}]"
-            , .{ self.t, self.origin, self.index, self.m} );
+        try fmt.format(out_stream, "{}, origin: {}, index {}, message: [{?}]", .{ self.t, self.origin, self.index, self.m });
     }
-
 };
 
 test "Event - creation and display" {
-    const config = .{.safety = true};
+    const config = .{ .safety = true };
     var gpa = std.heap.GeneralPurposeAllocator(config){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();

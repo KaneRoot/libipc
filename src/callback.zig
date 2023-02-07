@@ -27,9 +27,9 @@ pub const CBEvent = struct {
 
     // For IO callbacks (switching).
     pub const Type = enum {
-        NO_ERROR,      // No error. A message was generated.
-        ERROR,         // Generic error.
-        FD_CLOSING,    // The fd is closing.
-        IGNORE,        // The message should be ignored (protocol specific).
+        NO_ERROR, // No error. A message was generated.
+        ERROR, // Generic error.
+        FD_CLOSING, // The fd is closing.
+        IGNORE, // The message should be ignored (protocol specific).
     };
 };

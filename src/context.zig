@@ -26,29 +26,29 @@ pub const PollFD = std.ArrayList(std.os.pollfd);
 
 pub const IPC_HEADER_SIZE = 4; // Size (4 bytes) then content.
 pub const IPC_BASE_SIZE = 100000; // 100 KB, plenty enough space for messages
-pub const IPC_MAX_MESSAGE_SIZE = IPC_BASE_SIZE-IPC_HEADER_SIZE;
+pub const IPC_MAX_MESSAGE_SIZE = IPC_BASE_SIZE - IPC_HEADER_SIZE;
 pub const IPC_VERSION = 1;
 
 // Context of the whole networking state.
 pub const Context = struct {
-    rundir: [] u8,
-    allocator: std.mem.Allocator,  // Memory allocator.
-    connections: Connections,      // Keep track of connections.
+    rundir: []u8,
+    allocator: std.mem.Allocator, // Memory allocator.
+    connections: Connections, // Keep track of connections.
 
     // "pollfd" structures passed to poll(2). Same indexes as "connections".
-    pollfd: PollFD,  // .fd (fd_t) + .events (i16) + .revents (i16)
+    pollfd: PollFD, // .fd (fd_t) + .events (i16) + .revents (i16)
 
-    tx: Messages,       // Messages to send, once their fd is available.
+    tx: Messages, // Messages to send, once their fd is available.
     switchdb: SwitchDB, // Relations between fd.
 
-    timer: ?i32 = null,  // No timer by default (no TIMER event).
+    timer: ?i32 = null, // No timer by default (no TIMER event).
 
     const Self = @This();
 
     // Context initialization:
     // - init structures (provide the allocator)
     pub fn init(allocator: std.mem.Allocator) !Self {
-        var rundir = std.process.getEnvVarOwned(allocator, "RUNDIR") catch |err| switch(err) {
+        var rundir = std.process.getEnvVarOwned(allocator, "RUNDIR") catch |err| switch (err) {
             error.EnvironmentVariableNotFound => blk: {
                 break :blk try allocator.dupeZ(u8, "/tmp/libipc-run/");
             },
@@ -57,23 +57,16 @@ pub const Context = struct {
             },
         };
 
-        return Self {
-             .rundir = rundir
-           , .connections = Connections.init(allocator)
-           , .pollfd = PollFD.init(allocator)
-           , .tx = Messages.init(allocator)
-           , .switchdb = SwitchDB.init(allocator)
-           , .allocator = allocator
-        };
+        return Self{ .rundir = rundir, .connections = Connections.init(allocator), .pollfd = PollFD.init(allocator), .tx = Messages.init(allocator), .switchdb = SwitchDB.init(allocator), .allocator = allocator };
     }
 
     // create a server path for the UNIX socket based on the service name
     pub fn server_path(self: *Self, service_name: []const u8, writer: anytype) !void {
-        try writer.print("{s}/{s}", .{self.rundir, service_name});
+        try writer.print("{s}/{s}", .{ self.rundir, service_name });
     }
 
     pub fn deinit(self: *Self) void {
-        self.close_all() catch |err| switch(err){
+        self.close_all() catch |err| switch (err) {
             error.IndexOutOfBounds => {
                 log.err("context.deinit(): IndexOutOfBounds", .{});
             },
@@ -89,18 +82,16 @@ pub const Context = struct {
     }
 
     // Both simple connection and the switched one share this code.
-    fn connect_ (self: *Self, ctype: Connection.Type, path: []const u8) !i32 {
+    fn connect_(self: *Self, ctype: Connection.Type, path: []const u8) !i32 {
         var stream = try net.connectUnixSocket(path);
         const newfd = stream.handle;
         errdefer std.os.closeSocket(newfd);
         var newcon = Connection.init(ctype, null);
-        try self.add_ (newcon, newfd);
+        try self.add_(newcon, newfd);
         return newfd;
     }
 
-    fn connect_ipcd (self: *Self, service_name: []const u8
-                    , connection_type: Connection.Type) !?i32 {
-
+    fn connect_ipcd(self: *Self, service_name: []const u8, connection_type: Connection.Type) !?i32 {
         const buffer_size = 10000;
         var buffer: [buffer_size]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&buffer);
@@ -115,75 +106,75 @@ pub const Context = struct {
         //
         // Routing directives can be chained using " ;" separator:
         //   IPC_NETWORK="audio https://example.com/audio ;pong tls://pong.example.com/pong"
-        var network_envvar = std.process.getEnvVarOwned(allocator, "IPC_NETWORK") catch |err| switch(err) {
+        var network_envvar = std.process.getEnvVarOwned(allocator, "IPC_NETWORK") catch |err| switch (err) {
             // error{ OutOfMemory, EnvironmentVariableNotFound, InvalidUtf8 } (ErrorSet)
             error.EnvironmentVariableNotFound => {
                 log.debug("no IPC_NETWORK envvar: IPCd won't be contacted", .{});
                 return null;
             }, // no need to contact IPCd
-            else => { return err; },
+            else => {
+                return err;
+            },
         };
 
         var lookupbuffer: [buffer_size]u8 = undefined;
         var lookupfbs = std.io.fixedBufferStream(&lookupbuffer);
         var lookupwriter = lookupfbs.writer();
-        try lookupwriter.print("{s};{s}", .{service_name, network_envvar});
+        try lookupwriter.print("{s};{s}", .{ service_name, network_envvar });
 
         // Try to connect to the IPCd service
         var ipcdfd = try self.connect_service("ipc");
-        defer self.close_fd (ipcdfd) catch {}; // in any case, connection should be closed
+        defer self.close_fd(ipcdfd) catch {}; // in any case, connection should be closed
 
         // Send LOOKUP message
         //   content: target service name;${IPC_NETWORK}
         //   example: pong;pong tls://example.com:8998/pong
 
-        var m = try Message.init (ipcdfd, allocator, lookupfbs.getWritten());
-        try self.write (m);
+        var m = try Message.init(ipcdfd, allocator, lookupfbs.getWritten());
+        try self.write(m);
 
         // Read LOOKUP response
         //   case error: ignore and move on (TODO)
         //   else: get fd sent by IPCd then close IPCd fd
         var reception_buffer: [2000]u8 = undefined;
         var reception_size: usize = 0;
-        var newfd = try receive_fd (ipcdfd, &reception_buffer, &reception_size);
+        var newfd = try receive_fd(ipcdfd, &reception_buffer, &reception_size);
         if (reception_size == 0) {
             return error.IPCdFailedNoMessage;
         }
 
         var response: []u8 = reception_buffer[0..reception_size];
 
-        if (! std.mem.eql(u8, response, "ok")) {
+        if (!std.mem.eql(u8, response, "ok")) {
             return error.IPCdFailedNotOk;
         }
         var newcon = Connection.init(connection_type, null);
-        try self.add_ (newcon, newfd);
+        try self.add_(newcon, newfd);
         return newfd;
     }
 
     /// TODO: Add a new connection, but takes care of memory problems:
     /// in case one of the arrays cannot sustain another entry, the other
     /// won't be added.
-    fn add_ (self: *Self, new_connection: Connection, fd: os.socket_t) !void {
+    fn add_(self: *Self, new_connection: Connection, fd: os.socket_t) !void {
         try self.connections.append(new_connection);
-        try self.pollfd.append(.{ .fd = fd
-                                , .events = std.os.linux.POLL.IN
-                                , .revents = 0 });
+        try self.pollfd.append(.{ .fd = fd, .events = std.os.linux.POLL.IN, .revents = 0 });
     }
 
-    fn fd_to_index (self: Self, fd: i32) !usize {
+    fn fd_to_index(self: Self, fd: i32) !usize {
         var i: usize = 0;
-        while(i < self.pollfd.items.len) {
-           if (self.pollfd.items[i].fd == fd) {
-               return i;
-           }
-           i += 1;
+        while (i < self.pollfd.items.len) {
+            if (self.pollfd.items[i].fd == fd) {
+                return i;
+            }
+            i += 1;
         }
         return error.IndexNotFound;
     }
 
     /// Connect to the service directly, without reaching IPCd first.
     /// Return the connection FD.
-    pub fn connect_service (self: *Self, service_name: []const u8) !i32 {
+    pub fn connect_service(self: *Self, service_name: []const u8) !i32 {
         var buffer: [1000]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&buffer);
         var writer = fbs.writer();
@@ -191,44 +182,39 @@ pub const Context = struct {
         try self.server_path(service_name, writer);
         var path = fbs.getWritten();
 
-        return self.connect_ (Connection.Type.IPC, path);
+        return self.connect_(Connection.Type.IPC, path);
     }
 
     /// Tries to connect to IPCd first, then the service (if needed).
     /// Return the connection FD.
-    pub fn connect_ipc (self: *Self, service_name: []const u8) !i32 {
+    pub fn connect_ipc(self: *Self, service_name: []const u8) !i32 {
         // First, try ipcd.
-        if (try self.connect_ipcd (service_name, Connection.Type.IPC)) |fd| {
+        if (try self.connect_ipcd(service_name, Connection.Type.IPC)) |fd| {
             log.debug("Connected via IPCd, fd is {}", .{fd});
             return fd;
         }
         // In case this doesn't work, connect directly.
-        return try self.connect_service (service_name);
+        return try self.connect_service(service_name);
     }
 
     /// Add a new file descriptor to follow, labeled as EXTERNAL.
     /// Useful for protocol daemons (ex: TCPd) listening to a socket for external connections,
     /// clients trying to reach a libipc service.
-    pub fn add_external (self: *Self, newfd: i32) !void {
+    pub fn add_external(self: *Self, newfd: i32) !void {
         var newcon = Connection.init(Connection.Type.EXTERNAL, null);
-        try self.add_ (newcon, newfd);
+        try self.add_(newcon, newfd);
     }
 
     fn accept_new_client(self: *Self, event: *Event, server_index: usize) !void {
         // net.StreamServer
         var serverfd = self.pollfd.items[server_index].fd;
         var path = self.connections.items[server_index].path orelse return error.ServerWithNoPath;
-        var server = net.StreamServer {
-              .sockfd = serverfd
-            , .kernel_backlog = 100
-            , .reuse_address  = false
-            , .listen_address = try net.Address.initUnix(path)
-        };
+        var server = net.StreamServer{ .sockfd = serverfd, .kernel_backlog = 100, .reuse_address = false, .listen_address = try net.Address.initUnix(path) };
         var client = try server.accept(); // net.StreamServer.Connection
 
         const newfd = client.stream.handle;
         var newcon = Connection.init(Connection.Type.IPC, null);
-        try self.add_ (newcon, newfd);
+        try self.add_(newcon, newfd);
 
         const sfd = server.sockfd orelse return error.SocketLOL; // TODO
         // WARNING: imply every new item is last
@@ -237,7 +223,7 @@ pub const Context = struct {
 
     // Create a unix socket.
     // Store std lib structures in the context.
-    pub fn server_init(self: *Self, service_name: [] const u8) !net.StreamServer {
+    pub fn server_init(self: *Self, service_name: []const u8) !net.StreamServer {
         var buffer: [1000]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&buffer);
         var writer = fbs.writer();
@@ -252,15 +238,15 @@ pub const Context = struct {
         const newfd = server.sockfd orelse return error.SocketLOL; // TODO
         // Store the path in the Connection structure, so the UNIX socket file can be removed later.
         var newcon = Connection.init(Connection.Type.SERVER, try self.allocator.dupeZ(u8, path));
-        try self.add_ (newcon, newfd);
+        try self.add_(newcon, newfd);
         return server;
     }
 
-    pub fn write (_: *Self, m: Message) !void {
+    pub fn write(_: *Self, m: Message) !void {
         // Message contains the fd, no need to search for
         // the right structure to copy, let's just recreate
         // a Stream from the fd.
-        var stream = net.Stream { .handle = m.fd };
+        var stream = net.Stream{ .handle = m.fd };
 
         var buffer = [_]u8{0} ** IPC_MAX_MESSAGE_SIZE;
         var fbs = std.io.fixedBufferStream(&buffer);
@@ -268,16 +254,16 @@ pub const Context = struct {
 
         _ = try m.write(writer); // returns paylen
 
-        _ = try stream.write (fbs.getWritten());
+        _ = try stream.write(fbs.getWritten());
     }
 
-    pub fn schedule (self: *Self, m: Message) !void {
+    pub fn schedule(self: *Self, m: Message) !void {
         try self.tx.append(m);
     }
 
     /// Read from a client (indexed by a FD).
-    pub fn read_fd (self: *Self, fd: i32) !?Message {
-        return try self.read(try self.fd_to_index (fd));
+    pub fn read_fd(self: *Self, fd: i32) !?Message {
+        return try self.read(try self.fd_to_index(fd));
     }
 
     pub fn add_switch(self: *Self, fd1: i32, fd2: i32) !void {
@@ -287,16 +273,14 @@ pub const Context = struct {
         self.connections.items[index_origin].t = Connection.Type.SWITCHED;
         self.connections.items[index_destinataire].t = Connection.Type.SWITCHED;
 
-        try self.switchdb.add_switch(fd1,fd2);
+        try self.switchdb.add_switch(fd1, fd2);
     }
 
-    pub fn set_switch_callbacks(self: *Self, fd: i32
-        , in  : *const fn (origin: i32, mcontent: [*]u8, mlen: *u32) CBEventType
-        , out : *const fn (origin: i32, mcontent: [*]const u8, mlen: u32) CBEventType) !void {
-        try self.switchdb.set_callbacks(fd,in, out);
+    pub fn set_switch_callbacks(self: *Self, fd: i32, in: *const fn (origin: i32, mcontent: [*]u8, mlen: *u32) CBEventType, out: *const fn (origin: i32, mcontent: [*]const u8, mlen: u32) CBEventType) !void {
+        try self.switchdb.set_callbacks(fd, in, out);
     }
 
-    pub fn read (self: *Self, index: usize) !?Message {
+    pub fn read(self: *Self, index: usize) !?Message {
         if (index >= self.pollfd.items.len) {
             return error.IndexOutOfBounds;
         }
@@ -326,7 +310,7 @@ pub const Context = struct {
 
     /// Before closing the fd, test it via the 'fcntl' syscall.
     /// This is useful for switched connections: FDs could be closed without libipc being informed.
-    fn safe_close_fd (self: *Self, fd: i32) void {
+    fn safe_close_fd(self: *Self, fd: i32) void {
         var should_close = true;
         _ = std.os.fcntl(fd, std.os.F.GETFD, 0) catch {
             should_close = false;
@@ -341,8 +325,12 @@ pub const Context = struct {
         var current_event: Event = Event.init(Event.Type.ERROR, 0, 0, null);
         var wait_duration: i32 = -1; // -1 == unlimited
 
-        if (self.timer) |t| { log.debug("listening (timer: {} ms)", .{t}); wait_duration = t; }
-        else                { log.debug("listening (no timer)", .{}); }
+        if (self.timer) |t| {
+            log.debug("listening (timer: {} ms)", .{t});
+            wait_duration = t;
+        } else {
+            log.debug("listening (no timer)", .{});
+        }
 
         // Make sure we listen to the right file descriptors,
         // setting POLLIN & POLLOUT flags.
@@ -376,8 +364,7 @@ pub const Context = struct {
         if (count == 0) {
             if (duration >= wait_duration) {
                 current_event = Event.init(Event.Type.TIMER, 0, 0, null);
-            }
-            else {
+            } else {
                 // In case nothing happened, and poll wasn't triggered by time out.
                 current_event = Event.init(Event.Type.ERROR, 0, 0, null);
             }
@@ -388,7 +375,7 @@ pub const Context = struct {
         //   => loop over self.pollfd.items
         for (self.pollfd.items) |*fd, i| {
             // .revents is POLLIN
-            if(fd.revents & std.os.linux.POLL.IN > 0) {
+            if (fd.revents & std.os.linux.POLL.IN > 0) {
                 // SERVER = new connection
                 if (self.connections.items[i].t == .SERVER) {
                     try self.accept_new_client(&current_event, i);
@@ -396,21 +383,21 @@ pub const Context = struct {
                 }
                 // SWITCHED = send message to the right dest (or drop the switch)
                 else if (self.connections.items[i].t == .SWITCHED) {
-                    current_event = self.switchdb.handle_event_read (i, fd.fd);
+                    current_event = self.switchdb.handle_event_read(i, fd.fd);
                     switch (current_event.t) {
                         .SWITCH_RX => {
                             try self.schedule(current_event.m.?);
                         },
                         .DISCONNECTION => {
                             var dest = try self.switchdb.getDest(fd.fd);
-                            log.debug("disconnection from {} -> removing {}, too", .{fd.fd, dest});
+                            log.debug("disconnection from {} -> removing {}, too", .{ fd.fd, dest });
                             self.switchdb.nuke(fd.fd);
                             self.safe_close_fd(fd.fd);
                             self.safe_close_fd(dest);
                         },
                         .ERROR => {
                             var dest = try self.switchdb.getDest(fd.fd);
-                            log.warn("error from {} -> removing {}, too", .{fd.fd, dest});
+                            log.warn("error from {} -> removing {}, too", .{ fd.fd, dest });
                             self.switchdb.nuke(fd.fd);
                             self.safe_close_fd(fd.fd);
                             self.safe_close_fd(dest);
@@ -428,13 +415,15 @@ pub const Context = struct {
                 }
                 // otherwise = new message or disconnection
                 else {
-                    var maybe_message = self.read(i) catch |err| switch(err) {
+                    var maybe_message = self.read(i) catch |err| switch (err) {
                         error.ConnectionResetByPeer => {
                             log.warn("connection reset by peer", .{});
                             try self.close(i);
                             return Event.init(Event.Type.DISCONNECTION, i, fd.fd, null);
                         },
-                        else => { return err; },
+                        else => {
+                            return err;
+                        },
                     };
 
                     if (maybe_message) |m| {
@@ -447,8 +436,8 @@ pub const Context = struct {
             }
 
             // .revent is POLLOUT
-            if(fd.revents & std.os.linux.POLL.OUT > 0) {
-                fd.events &= ~ @as(i16, std.os.linux.POLL.OUT);
+            if (fd.revents & std.os.linux.POLL.OUT > 0) {
+                fd.events &= ~@as(i16, std.os.linux.POLL.OUT);
 
                 var index: usize = undefined;
                 for (self.tx.items) |m, index_| {
@@ -462,14 +451,13 @@ pub const Context = struct {
 
                 // SWITCHED = write message for its switch buddy (callbacks)
                 if (self.connections.items[i].t == .SWITCHED) {
-                    current_event = self.switchdb.handle_event_write (i, m);
+                    current_event = self.switchdb.handle_event_write(i, m);
                     // Message inner memory is already freed.
                     switch (current_event.t) {
-                        .SWITCH_TX => {
-                        },
+                        .SWITCH_TX => {},
                         .ERROR => {
                             var dest = try self.switchdb.getDest(fd.fd);
-                            log.warn("error from {} -> removing {}, too", .{fd.fd, dest});
+                            log.warn("error from {} -> removing {}, too", .{ fd.fd, dest });
                             self.switchdb.nuke(fd.fd);
                             self.safe_close_fd(fd.fd);
                             self.safe_close_fd(dest);
@@ -480,24 +468,24 @@ pub const Context = struct {
                         },
                     }
                     return current_event;
-                }
-                else {
+                } else {
                     // otherwise = write message for the msg.fd
-                    try self.write (m);
+                    try self.write(m);
                     m.deinit();
                     return Event.init(Event.Type.MESSAGE_TX, i, fd.fd, null);
                 }
             }
             // .revent is POLLHUP
-            if(fd.revents & std.os.linux.POLL.HUP > 0) {
+            if (fd.revents & std.os.linux.POLL.HUP > 0) {
                 // handle disconnection
                 current_event = Event.init(Event.Type.DISCONNECTION, i, fd.fd, null);
                 try self.close(i);
                 return current_event;
             }
             // if fd revent is POLLERR or POLLNVAL
-            if ((fd.revents & std.os.linux.POLL.HUP  > 0) or
-                (fd.revents & std.os.linux.POLL.NVAL > 0)) {
+            if ((fd.revents & std.os.linux.POLL.HUP > 0) or
+                (fd.revents & std.os.linux.POLL.NVAL > 0))
+            {
                 return Event.init(Event.Type.ERROR, i, fd.fd, null);
             }
         }
@@ -507,7 +495,7 @@ pub const Context = struct {
 
     /// Remove a connection based on its file descriptor.
     pub fn close_fd(self: *Self, fd: i32) !void {
-        try self.close(try self.fd_to_index (fd));
+        try self.close(try self.fd_to_index(fd));
     }
 
     pub fn close(self: *Self, index: usize) !void {
@@ -543,13 +531,13 @@ pub const Context = struct {
     }
 
     pub fn close_all(self: *Self) !void {
-        while(self.connections.items.len > 0) { try self.close(0); }
+        while (self.connections.items.len > 0) {
+            try self.close(0);
+        }
     }
 
     pub fn format(self: Self, comptime form: []const u8, options: fmt.FormatOptions, out_stream: anytype) !void {
-        try fmt.format(out_stream
-            , "context ({} connections and {} messages):"
-            , .{self.connections.items.len, self.tx.items.len});
+        try fmt.format(out_stream, "context ({} connections and {} messages):", .{ self.connections.items.len, self.tx.items.len });
 
         for (self.connections.items) |con| {
             try fmt.format(out_stream, "\n- ", .{});
@@ -568,7 +556,7 @@ pub const Context = struct {
 // not an instance of Message.
 const CommunicationTestThread = struct {
     fn clientFn() !void {
-        const config = .{.safety = true};
+        const config = .{ .safety = true };
         var gpa = std.heap.GeneralPurposeAllocator(config){};
         defer _ = gpa.deinit();
         const allocator = gpa.allocator();
@@ -589,7 +577,7 @@ const CommunicationTestThread = struct {
 };
 
 test "Context - creation, display and memory check" {
-    const config = .{.safety = true};
+    const config = .{ .safety = true };
     var gpa = std.heap.GeneralPurposeAllocator(config){};
     defer _ = gpa.deinit();
 
@@ -605,7 +593,7 @@ test "Context - creation, display and memory check" {
     var path = fbs.getWritten();
 
     // SERVER SIDE: creating a service.
-    var server = c.server_init("simple-context-test") catch |err| switch(err) {
+    var server = c.server_init("simple-context-test") catch |err| switch (err) {
         error.FileNotFound => {
             log.err("cannot init server at {s}", .{path});
             return err;
@@ -631,7 +619,7 @@ test "Context - creation, display and memory check" {
 // This is a client sending a an instance of Message.
 const ConnectThenSendMessageThread = struct {
     fn clientFn() !void {
-        const config = .{.safety = true};
+        const config = .{ .safety = true };
         var gpa = std.heap.GeneralPurposeAllocator(config){};
         defer _ = gpa.deinit();
         const allocator = gpa.allocator();
@@ -663,9 +651,8 @@ const ConnectThenSendMessageThread = struct {
     }
 };
 
-
 test "Context - creation, echo once" {
-    const config = .{.safety = true};
+    const config = .{ .safety = true };
     var gpa = std.heap.GeneralPurposeAllocator(config){};
     defer _ = gpa.deinit();
 
@@ -681,7 +668,7 @@ test "Context - creation, echo once" {
     var path = fbs.getWritten();
 
     // SERVER SIDE: creating a service.
-    var server = c.server_init("simple-context-test") catch |err| switch(err) {
+    var server = c.server_init("simple-context-test") catch |err| switch (err) {
         error.FileNotFound => {
             log.err("cannot init server at {s}", .{path});
             return err;

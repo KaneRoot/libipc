@@ -5,7 +5,7 @@ const fmt = std.fmt;
 const net = std.net;
 
 const ipc = @import("./main.zig");
-const Message  = ipc.Message;
+const Message = ipc.Message;
 const CBEventType = ipc.CBEvent.Type;
 
 const Allocator = std.mem.Allocator;
@@ -41,30 +41,28 @@ pub const SwitchDB = struct {
 
     db: std.AutoArrayHashMap(i32, ManagedConnection),
 
-    pub fn init (allocator: Allocator) Self {
-        return Self {
+    pub fn init(allocator: Allocator) Self {
+        return Self{
             .db = std.AutoArrayHashMap(i32, ManagedConnection).init(allocator),
         };
     }
 
-    pub fn deinit (self: *Self) void {
+    pub fn deinit(self: *Self) void {
         self.db.deinit();
     }
 
     pub fn format(self: Self, comptime _: []const u8, _: fmt.FormatOptions, out_stream: anytype) !void {
-        for(self.db.keys()) |k,i| {
-            try fmt.format(out_stream, "({},{})", .{k, self.db.values()[i].dest});
+        for (self.db.keys()) |k, i| {
+            try fmt.format(out_stream, "({},{})", .{ k, self.db.values()[i].dest });
         }
     }
 
     pub fn add_switch(self: *Self, fd1: i32, fd2: i32) !void {
-        try self.db.put(fd1, ManagedConnection {.dest = fd2});
-        try self.db.put(fd2, ManagedConnection {.dest = fd1});
+        try self.db.put(fd1, ManagedConnection{ .dest = fd2 });
+        try self.db.put(fd2, ManagedConnection{ .dest = fd1 });
     }
 
-    pub fn set_callbacks(self: *Self, fd: i32
-        , in  : *const fn (origin: i32, mcontent: [*]u8,       mlen: *u32) CBEventType
-        , out : *const fn (origin: i32, mcontent: [*]const u8, mlen: u32)  CBEventType) !void {
+    pub fn set_callbacks(self: *Self, fd: i32, in: *const fn (origin: i32, mcontent: [*]u8, mlen: *u32) CBEventType, out: *const fn (origin: i32, mcontent: [*]const u8, mlen: u32) CBEventType) !void {
         var managedconnection = self.db.get(fd) orelse return error.unregisteredFD;
         managedconnection.in = in;
         managedconnection.out = out;
@@ -72,7 +70,7 @@ pub const SwitchDB = struct {
 
     /// Dig the "db" hashmap, perform "in" fn, may provide a message.
     /// Errors from the "in" fn are reported as Zig errors.
-    pub fn read (self: *Self, fd: i32) !?Message {
+    pub fn read(self: *Self, fd: i32) !?Message {
         // assert there is an entry with this fd as a key.
         var managedconnection = self.db.get(fd) orelse return error.unregisteredFD;
 
@@ -82,22 +80,25 @@ pub const SwitchDB = struct {
 
         switch (r) {
             // The message should be ignored (protocol specific).
-            CBEventType.IGNORE     => { return null; },
-            CBEventType.NO_ERROR   => {
+            CBEventType.IGNORE => {
+                return null;
+            },
+            CBEventType.NO_ERROR => {
                 // TODO: read message
                 // TODO: better allocator?
                 // TODO: better errors?
-                var message: Message
-                    = Message.read(managedconnection.dest
-                                  , buffer[0..message_size]
-                                  , std.heap.c_allocator) catch {
+                var message: Message = Message.read(managedconnection.dest, buffer[0..message_size], std.heap.c_allocator) catch {
                     return error.generic;
                 };
                 return message;
             },
-            CBEventType.FD_CLOSING => { return error.closeFD; },
+            CBEventType.FD_CLOSING => {
+                return error.closeFD;
+            },
             // Generic error, or the message was read but with errors.
-            CBEventType.ERROR      => { return error.generic; },
+            CBEventType.ERROR => {
+                return error.generic;
+            },
         }
 
         unreachable;
@@ -105,7 +106,7 @@ pub const SwitchDB = struct {
 
     /// Dig the "db" hashmap and perform "out" fn.
     /// Errors from the "out" fn are reported as Zig errors.
-    pub fn write (self: *Self, message: Message) !void {
+    pub fn write(self: *Self, message: Message) !void {
         // assert there is an entry with this fd as a key.
         var managedconnection = self.db.get(message.fd) orelse return error.unregisteredFD;
 
@@ -125,10 +126,11 @@ pub const SwitchDB = struct {
             CBEventType.NO_ERROR => {
                 return;
             },
-            CBEventType.FD_CLOSING => { return error.closeFD; },
+            CBEventType.FD_CLOSING => {
+                return error.closeFD;
+            },
             // Generic error, or the message was read but with errors.
-            CBEventType.IGNORE,
-            CBEventType.ERROR => {
+            CBEventType.IGNORE, CBEventType.ERROR => {
                 return error.generic;
             },
         }
@@ -137,14 +139,13 @@ pub const SwitchDB = struct {
     }
 
     /// From a message to read on a socket to an Event.
-    pub fn handle_event_read (self: *Self, index: usize, fd: i32) Event {
+    pub fn handle_event_read(self: *Self, index: usize, fd: i32) Event {
         var message: ?Message = null;
-        message = self.read (fd) catch |err| switch(err) {
+        message = self.read(fd) catch |err| switch (err) {
             error.closeFD => {
                 return Event.init(Event.Type.DISCONNECTION, index, fd, null);
             },
-            error.unregisteredFD,
-            error.generic => {
+            error.unregisteredFD, error.generic => {
                 return Event.init(Event.Type.ERROR, index, fd, null);
             },
         };
@@ -152,15 +153,14 @@ pub const SwitchDB = struct {
     }
 
     /// Message is free'd in any case.
-    pub fn handle_event_write (self: *Self, index: usize, message: Message) Event {
+    pub fn handle_event_write(self: *Self, index: usize, message: Message) Event {
         defer message.deinit();
         var fd = message.fd;
-        self.write(message) catch |err| switch(err) {
+        self.write(message) catch |err| switch (err) {
             error.closeFD => {
                 return Event.init(Event.Type.DISCONNECTION, index, fd, null);
             },
-            error.unregisteredFD,
-            error.generic => {
+            error.unregisteredFD, error.generic => {
                 return Event.init(Event.Type.ERROR, index, fd, null);
             },
         };
@@ -168,12 +168,12 @@ pub const SwitchDB = struct {
     }
 
     /// Simple wrapper around self.db.get.
-    pub fn getDest (self: *Self, fd: i32) !i32 {
+    pub fn getDest(self: *Self, fd: i32) !i32 {
         return self.db.get(fd).?.dest;
     }
 
     /// Remove both entries (client and service) from the DB.
-    pub fn nuke (self: *Self, fd: i32) void {
+    pub fn nuke(self: *Self, fd: i32) void {
         if (self.db.fetchSwapRemove(fd)) |kv| {
             _ = self.db.swapRemove(kv.value.dest);
         }
@@ -181,43 +181,43 @@ pub const SwitchDB = struct {
 };
 
 const ManagedConnection = struct {
-    dest : i32,
-    in  : *const fn (origin: i32, mcontent: [*]u8,       mlen: *u32) CBEventType = default_in,
-    out : *const fn (origin: i32, mcontent: [*]const u8, mlen: u32)  CBEventType = default_out,
+    dest: i32,
+    in: *const fn (origin: i32, mcontent: [*]u8, mlen: *u32) CBEventType = default_in,
+    out: *const fn (origin: i32, mcontent: [*]const u8, mlen: u32) CBEventType = default_out,
 };
 
 test "creation and display" {
-   const config = .{.safety = true};
-   var gpa = std.heap.GeneralPurposeAllocator(config){};
-   defer _ = gpa.deinit();
-   const allocator = gpa.allocator();
+    const config = .{ .safety = true };
+    var gpa = std.heap.GeneralPurposeAllocator(config){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-   var switchdb = SwitchDB.init(allocator);
-   defer switchdb.deinit();
+    var switchdb = SwitchDB.init(allocator);
+    defer switchdb.deinit();
 
-   try switchdb.db.put(5, ManagedConnection {.dest = 6});
-   try switchdb.db.put(6, ManagedConnection {.dest = 5});
+    try switchdb.db.put(5, ManagedConnection{ .dest = 6 });
+    try switchdb.db.put(6, ManagedConnection{ .dest = 5 });
 
-   try print_eq("{ (5,6)(6,5) }", .{switchdb});
+    try print_eq("{ (5,6)(6,5) }", .{switchdb});
 }
 
-fn successful_in (_: i32, mcontent: [*]u8, mlen: *u32) CBEventType {
+fn successful_in(_: i32, mcontent: [*]u8, mlen: *u32) CBEventType {
     var m = Message.init(8, std.heap.c_allocator, "coucou") catch unreachable;
     defer m.deinit();
 
     var fbs = std.io.fixedBufferStream(mcontent[0..mlen.*]);
     var writer = fbs.writer();
-    const bytes_written = m.write (writer) catch unreachable;
+    const bytes_written = m.write(writer) catch unreachable;
     mlen.* = @truncate(u32, bytes_written);
     return CBEventType.NO_ERROR;
 }
 
-fn successful_out (_: i32, _: [*]const u8, _: u32) CBEventType {
+fn successful_out(_: i32, _: [*]const u8, _: u32) CBEventType {
     return CBEventType.NO_ERROR;
 }
 
 test "successful exchanges" {
-    const config = .{.safety = true};
+    const config = .{ .safety = true };
     var gpa = std.heap.GeneralPurposeAllocator(config){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -225,34 +225,42 @@ test "successful exchanges" {
     var switchdb = SwitchDB.init(allocator);
     defer switchdb.deinit();
 
-    try switchdb.db.put(5, ManagedConnection {.dest = 6, .in = successful_in, .out = successful_out});
-    try switchdb.db.put(6, ManagedConnection {.dest = 5, .in = successful_in, .out = successful_out});
+    try switchdb.db.put(5, ManagedConnection{ .dest = 6, .in = successful_in, .out = successful_out });
+    try switchdb.db.put(6, ManagedConnection{ .dest = 5, .in = successful_in, .out = successful_out });
 
     // should return a new message (hardcoded: fd 8, payload "coucou")
-    var event_1: Event = switchdb.handle_event_read (1, 5);
-    if (event_1.m) |m| { m.deinit(); }
-    else               { return error.NoMessage; }
+    var event_1: Event = switchdb.handle_event_read(1, 5);
+    if (event_1.m) |m| {
+        m.deinit();
+    } else {
+        return error.NoMessage;
+    }
 
     // should return a new message (hardcoded: fd 8, payload "coucou")
-    var event_2: Event = switchdb.handle_event_read (1, 6);
-    if (event_2.m) |m| { m.deinit(); }
-    else               { return error.NoMessage; }
+    var event_2: Event = switchdb.handle_event_read(1, 6);
+    if (event_2.m) |m| {
+        m.deinit();
+    } else {
+        return error.NoMessage;
+    }
 
     var message = try Message.init(6, allocator, "coucou");
-    var event_3 = switchdb.handle_event_write (5, message);
-    if (event_3.m) |_| { return error.ShouldNotCarryMessage; }
+    var event_3 = switchdb.handle_event_write(5, message);
+    if (event_3.m) |_| {
+        return error.ShouldNotCarryMessage;
+    }
 }
 
-fn unsuccessful_in (_: i32, _: [*]const u8, _: *u32) CBEventType {
+fn unsuccessful_in(_: i32, _: [*]const u8, _: *u32) CBEventType {
     return CBEventType.ERROR;
 }
 
-fn unsuccessful_out (_: i32, _: [*]const u8, _: u32) CBEventType {
+fn unsuccessful_out(_: i32, _: [*]const u8, _: u32) CBEventType {
     return CBEventType.ERROR;
 }
 
 test "unsuccessful exchanges" {
-    const config = .{.safety = true};
+    const config = .{ .safety = true };
     var gpa = std.heap.GeneralPurposeAllocator(config){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -260,24 +268,30 @@ test "unsuccessful exchanges" {
     var switchdb = SwitchDB.init(allocator);
     defer switchdb.deinit();
 
-    try switchdb.db.put(5, ManagedConnection {.dest = 6, .in = unsuccessful_in, .out = unsuccessful_out});
-    try switchdb.db.put(6, ManagedConnection {.dest = 5, .in = unsuccessful_in, .out = unsuccessful_out});
+    try switchdb.db.put(5, ManagedConnection{ .dest = 6, .in = unsuccessful_in, .out = unsuccessful_out });
+    try switchdb.db.put(6, ManagedConnection{ .dest = 5, .in = unsuccessful_in, .out = unsuccessful_out });
 
     // should return a new message (hardcoded: fd 8, payload "coucou")
-    var event_1: Event = switchdb.handle_event_read (1, 5);
-    if (event_1.m) |_| { return error.ShouldNotCarryMessage; }
+    var event_1: Event = switchdb.handle_event_read(1, 5);
+    if (event_1.m) |_| {
+        return error.ShouldNotCarryMessage;
+    }
 
     // should return a new message (hardcoded: fd 8, payload "coucou")
-    var event_2: Event = switchdb.handle_event_read (1, 6);
-    if (event_2.m) |_| { return error.ShouldNotCarryMessage; }
+    var event_2: Event = switchdb.handle_event_read(1, 6);
+    if (event_2.m) |_| {
+        return error.ShouldNotCarryMessage;
+    }
 
     var message = try Message.init(6, allocator, "coucou");
-    var event_3 = switchdb.handle_event_write (5, message);
-    if (event_3.m) |_| { return error.ShouldNotCarryMessage; }
+    var event_3 = switchdb.handle_event_write(5, message);
+    if (event_3.m) |_| {
+        return error.ShouldNotCarryMessage;
+    }
 }
 
 test "nuke 'em" {
-    const config = .{.safety = true};
+    const config = .{ .safety = true };
     var gpa = std.heap.GeneralPurposeAllocator(config){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -285,15 +299,15 @@ test "nuke 'em" {
     var switchdb = SwitchDB.init(allocator);
     defer switchdb.deinit();
 
-    try switchdb.db.put(5, ManagedConnection {.dest = 6, .in = unsuccessful_in, .out = unsuccessful_out});
-    try switchdb.db.put(6, ManagedConnection {.dest = 5, .in = unsuccessful_in, .out = unsuccessful_out});
+    try switchdb.db.put(5, ManagedConnection{ .dest = 6, .in = unsuccessful_in, .out = unsuccessful_out });
+    try switchdb.db.put(6, ManagedConnection{ .dest = 5, .in = unsuccessful_in, .out = unsuccessful_out });
 
     try testing.expect(switchdb.db.count() == 2);
     switchdb.nuke(5);
     try testing.expect(switchdb.db.count() == 0);
 }
 
-fn default_in (origin: i32, mcontent: [*]u8, mlen: *u32) CBEventType {
+fn default_in(origin: i32, mcontent: [*]u8, mlen: *u32) CBEventType {
     // This may be kinda hacky, idk.
     var stream: net.Stream = .{ .handle = origin };
     var packet_size: usize = stream.read(mcontent[0..mlen.*]) catch return CBEventType.ERROR;
@@ -309,12 +323,12 @@ fn default_in (origin: i32, mcontent: [*]u8, mlen: *u32) CBEventType {
     return CBEventType.NO_ERROR;
 }
 
-fn default_out (fd: i32, mcontent: [*]const u8, mlen: u32) CBEventType {
+fn default_out(fd: i32, mcontent: [*]const u8, mlen: u32) CBEventType {
     // Message contains the fd, no need to search for the right structure to copy,
     // let's just recreate a Stream from the fd.
 
     var to_send = mcontent[0..mlen];
-    var stream = net.Stream { .handle = fd };
-    _ = stream.write (to_send) catch return CBEventType.ERROR;
+    var stream = net.Stream{ .handle = fd };
+    _ = stream.write(to_send) catch return CBEventType.ERROR;
     return CBEventType.NO_ERROR;
 }

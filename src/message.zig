@@ -8,20 +8,15 @@ const print_eq = @import("./util.zig").print_eq;
 pub const Messages = std.ArrayList(Message);
 
 pub const Message = struct {
-
-    fd: i32,              // File descriptor concerned about this message.
+    fd: i32, // File descriptor concerned about this message.
     payload: []const u8,
 
-    allocator: std.mem.Allocator,  // Memory allocator.
+    allocator: std.mem.Allocator, // Memory allocator.
 
     const Self = @This();
 
-    pub fn init(fd: i32
-               , allocator: std.mem.Allocator
-               , payload: []const u8) !Self {
-        return Message { .fd = fd
-            , .allocator = allocator
-            , .payload = try allocator.dupe(u8, payload) };
+    pub fn init(fd: i32, allocator: std.mem.Allocator, payload: []const u8) !Self {
+        return Message{ .fd = fd, .allocator = allocator, .payload = try allocator.dupe(u8, payload) };
     }
 
     pub fn deinit(self: Self) void {
@@ -29,7 +24,6 @@ pub const Message = struct {
     }
 
     pub fn read(fd: i32, buffer: []const u8, allocator: std.mem.Allocator) !Self {
-
         var fbs = std.io.fixedBufferStream(buffer);
         var reader = fbs.reader();
 
@@ -37,7 +31,7 @@ pub const Message = struct {
         if (msg_len > buffer.len - 4) {
             return error.wrongMessageLength;
         }
-        const msg_payload = buffer[4..4+msg_len];
+        const msg_payload = buffer[4 .. 4 + msg_len];
 
         return try Message.init(fd, allocator, msg_payload);
     }
@@ -48,14 +42,13 @@ pub const Message = struct {
     }
 
     pub fn format(self: Self, comptime _: []const u8, _: fmt.FormatOptions, out_stream: anytype) !void {
-        try fmt.format(out_stream, "fd: {}, payload: [{s}]",
-            .{self.fd, self.payload} );
+        try fmt.format(out_stream, "fd: {}, payload: [{s}]", .{ self.fd, self.payload });
     }
 };
 
 test "Message - creation and display" {
     // fd payload
-    const config = .{.safety = true};
+    const config = .{ .safety = true };
     var gpa = std.heap.GeneralPurposeAllocator(config){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -68,7 +61,7 @@ test "Message - creation and display" {
 
 test "Message - read and write" {
     // fd payload
-    const config = .{.safety = true};
+    const config = .{ .safety = true };
     var gpa = std.heap.GeneralPurposeAllocator(config){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();

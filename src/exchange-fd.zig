@@ -5,7 +5,7 @@ const log = std.log.scoped(.libipc_exchangefd);
 
 const builtin = @import("builtin");
 const windows = std.os.windows;
-const errno   = std.os.errno;
+const errno = std.os.errno;
 const system = std.os.system;
 const unexpectedErrno = std.os.unexpectedErrno;
 const SendMsgError = std.os.SendMsgError;
@@ -19,7 +19,7 @@ pub fn Cmsghdr(comptime T: type) type {
     const Header = extern struct {
         len: usize,
         level: c_int,
-        @"type": c_int,
+        type: c_int,
     };
 
     const data_align = @sizeOf(usize);
@@ -32,14 +32,14 @@ pub fn Cmsghdr(comptime T: type) type {
 
         pub fn init(args: struct {
             level: c_int,
-            @"type": c_int,
+            type: c_int,
             data: T,
         }) Self {
             var self: Self = undefined;
             self.headerPtr().* = .{
                 .len = data_offset + @sizeOf(T),
                 .level = args.level,
-                .@"type" = args.@"type",
+                .type = args.type,
             };
             self.dataPtr().* = args.data;
             return self;
@@ -48,13 +48,13 @@ pub fn Cmsghdr(comptime T: type) type {
         // TODO: include this version if we submit a PR to add this to std
         pub fn initNoData(args: struct {
             level: c_int,
-            @"type": c_int,
+            type: c_int,
         }) Self {
             var self: Self = undefined;
             self.headerPtr().* = .{
                 .len = data_offset + @sizeOf(T),
                 .level = args.level,
-                .@"type" = args.@"type",
+                .type = args.type,
             };
             return self;
         }
@@ -84,7 +84,7 @@ pub fn send_fd(sockfd: os.socket_t, msg: []const u8, fd: os.fd_t) void {
 
     var cmsg = Cmsghdr(os.fd_t).init(.{
         .level = os.SOL.SOCKET,
-        .@"type" = SCM_RIGHTS,
+        .type = SCM_RIGHTS,
         .data = fd,
     });
 
@@ -96,14 +96,14 @@ pub fn send_fd(sockfd: os.socket_t, msg: []const u8, fd: os.fd_t) void {
         .control = &cmsg,
         .controllen = @sizeOf(@TypeOf(cmsg)),
         .flags = 0,
-        }, 0) catch |err| {
+    }, 0) catch |err| {
         log.err("error sendmsg failed with {s}", .{@errorName(err)});
         return;
     };
 
     if (len != msg.len) {
         // We don't have much choice but to exit here.
-        log.err("expected sendmsg to return {} but got {}", .{msg.len, len});
+        log.err("expected sendmsg to return {} but got {}", .{ msg.len, len });
         os.exit(0xff);
     }
 }
@@ -187,31 +187,19 @@ pub fn recvmsg(
 /// A message can be carried with it, copied into 'buffer'.
 /// WARNING: buffer must be at least 1500 bytes.
 pub fn receive_fd(sockfd: os.socket_t, buffer: []u8, msg_size: *usize) !os.fd_t {
-
     var msg_buffer = [_]u8{0} ** 1500;
 
     var iov = [_]os.iovec{
-        .{
-              .iov_base = msg_buffer[0..]
-            , .iov_len  = msg_buffer.len
-        },
+        .{ .iov_base = msg_buffer[0..], .iov_len = msg_buffer.len },
     };
 
     var cmsg = Cmsghdr(os.fd_t).init(.{
         .level = os.SOL.SOCKET,
-        .@"type" = SCM_RIGHTS,
+        .type = SCM_RIGHTS,
         .data = 0,
     });
 
-    var msg: std.os.msghdr = .{
-          .name = null
-        , .namelen = 0
-        , .iov = &iov
-        , .iovlen = 1
-        , .control = &cmsg
-        , .controllen = @sizeOf(@TypeOf(cmsg))
-        , .flags = 0
-    };
+    var msg: std.os.msghdr = .{ .name = null, .namelen = 0, .iov = &iov, .iovlen = 1, .control = &cmsg, .controllen = @sizeOf(@TypeOf(cmsg)), .flags = 0 };
 
     var msglen = recvmsg(sockfd, msg, 0) catch |err| {
         log.err("error recvmsg failed with {s}", .{@errorName(err)});
