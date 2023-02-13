@@ -3,6 +3,10 @@ const testing = std.testing;
 const net = std.net;
 const os = std.os;
 const fmt = std.fmt;
+const c = std.c;
+
+// TODO: to remove once PR https://github.com/ziglang/zig/pull/14639 is accepted.
+pub extern "c" fn umask(mode: c.mode_t) c.mode_t;
 
 const log = std.log.scoped(.libipc_context);
 
@@ -228,6 +232,11 @@ pub const Context = struct {
         var fbs = std.io.fixedBufferStream(&buffer);
         var writer = fbs.writer();
 
+        // Allow to create a unix socket with the right permissions.
+        // Group should include write permissions.
+        var previous_mask = umask(0o117);
+        defer _ = umask(previous_mask);
+
         try self.server_path(service_name, writer);
         var path = fbs.getWritten();
 
@@ -239,6 +248,7 @@ pub const Context = struct {
         // Store the path in the Connection structure, so the UNIX socket file can be removed later.
         var newcon = Connection.init(Connection.Type.SERVER, try self.allocator.dupeZ(u8, path));
         try self.add_(newcon, newfd);
+
         return server;
     }
 
@@ -561,14 +571,14 @@ const CommunicationTestThread = struct {
         defer _ = gpa.deinit();
         const allocator = gpa.allocator();
 
-        var c = try Context.init(allocator);
-        defer c.deinit(); // There. Can't leak. Isn't Zig wonderful?
+        var ctx = try Context.init(allocator);
+        defer ctx.deinit(); // There. Can't leak. Isn't Zig wonderful?
 
         var buffer: [1000]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&buffer);
         var writer = fbs.writer();
 
-        try c.server_path("simple-context-test", writer);
+        try ctx.server_path("simple-context-test", writer);
         var path = fbs.getWritten();
         const socket = try net.connectUnixSocket(path);
         defer socket.close();
@@ -583,17 +593,17 @@ test "Context - creation, display and memory check" {
 
     const allocator = gpa.allocator();
 
-    var c = try Context.init(allocator);
-    defer c.deinit(); // There. Can't leak. Isn't Zig wonderful?
+    var ctx = try Context.init(allocator);
+    defer ctx.deinit(); // There. Can't leak. Isn't Zig wonderful?
 
     var buffer: [1000]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
     var writer = fbs.writer();
-    try c.server_path("simple-context-test", writer);
+    try ctx.server_path("simple-context-test", writer);
     var path = fbs.getWritten();
 
     // SERVER SIDE: creating a service.
-    var server = c.server_init("simple-context-test") catch |err| switch (err) {
+    var server = ctx.server_init("simple-context-test") catch |err| switch (err) {
         error.FileNotFound => {
             log.err("cannot init server at {s}", .{path});
             return err;
@@ -624,13 +634,13 @@ const ConnectThenSendMessageThread = struct {
         defer _ = gpa.deinit();
         const allocator = gpa.allocator();
 
-        var c = try Context.init(allocator);
-        defer c.deinit(); // There. Can't leak. Isn't Zig wonderful?
+        var ctx = try Context.init(allocator);
+        defer ctx.deinit(); // There. Can't leak. Isn't Zig wonderful?
 
         var path_buffer: [1000]u8 = undefined;
         var path_fbs = std.io.fixedBufferStream(&path_buffer);
         var path_writer = path_fbs.writer();
-        try c.server_path("simple-context-test", path_writer);
+        try ctx.server_path("simple-context-test", path_writer);
         var path = path_fbs.getWritten();
 
         // Actual UNIX socket connection.
@@ -658,17 +668,17 @@ test "Context - creation, echo once" {
 
     const allocator = gpa.allocator();
 
-    var c = try Context.init(allocator);
-    defer c.deinit(); // There. Can't leak. Isn't Zig wonderful?
+    var ctx = try Context.init(allocator);
+    defer ctx.deinit(); // There. Can't leak. Isn't Zig wonderful?
 
     var buffer: [1000]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buffer);
     var writer = fbs.writer();
-    try c.server_path("simple-context-test", writer);
+    try ctx.server_path("simple-context-test", writer);
     var path = fbs.getWritten();
 
     // SERVER SIDE: creating a service.
-    var server = c.server_init("simple-context-test") catch |err| switch (err) {
+    var server = ctx.server_init("simple-context-test") catch |err| switch (err) {
         error.FileNotFound => {
             log.err("cannot init server at {s}", .{path});
             return err;
