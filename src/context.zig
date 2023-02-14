@@ -54,19 +54,29 @@ pub const Context = struct {
     pub fn init(allocator: std.mem.Allocator) !Self {
         var rundir = std.process.getEnvVarOwned(allocator, "RUNDIR") catch |err| switch (err) {
             error.EnvironmentVariableNotFound => blk: {
-                break :blk try allocator.dupeZ(u8, "/tmp/libipc-run/");
+                break :blk try allocator.dupeZ(u8, "/tmp/.libipc-run/");
             },
             else => {
                 return err;
             },
         };
 
-        return Self{ .rundir = rundir, .connections = Connections.init(allocator), .pollfd = PollFD.init(allocator), .tx = Messages.init(allocator), .switchdb = SwitchDB.init(allocator), .allocator = allocator };
-    }
+        // Allow mkdir to create a directory with 0o770 permissions.
+        var previous_mask = umask(0o007);
+        defer _ = umask(previous_mask);
 
-    // create a server path for the UNIX socket based on the service name
-    pub fn server_path(self: *Self, service_name: []const u8, writer: anytype) !void {
-        try writer.print("{s}/{s}", .{ self.rundir, service_name });
+        // Create the run directory, where all UNIX sockets will be.
+        std.os.mkdir(rundir, 0o0770) catch |err| switch(err) {
+            error.PathAlreadyExists => {
+                log.warn("runtime directory ({s}) already exists, (everything is fine, ignoring)", .{rundir});
+            },
+            else => {
+                log.warn("runtime directory ({s}): {any}", .{rundir, err});
+                return err;
+            },
+        };
+
+        return Self{ .rundir = rundir, .connections = Connections.init(allocator), .pollfd = PollFD.init(allocator), .tx = Messages.init(allocator), .switchdb = SwitchDB.init(allocator), .allocator = allocator };
     }
 
     pub fn deinit(self: *Self) void {
@@ -180,12 +190,7 @@ pub const Context = struct {
     /// Return the connection FD.
     pub fn connect_service(self: *Self, service_name: []const u8) !i32 {
         var buffer: [1000]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buffer);
-        var writer = fbs.writer();
-
-        try self.server_path(service_name, writer);
-        var path = fbs.getWritten();
-
+        var path = try std.fmt.bufPrint(&buffer, "{s}/{s}", .{ self.rundir, service_name });
         return self.connect_(Connection.Type.IPC, path);
     }
 
@@ -229,16 +234,12 @@ pub const Context = struct {
     // Store std lib structures in the context.
     pub fn server_init(self: *Self, service_name: []const u8) !net.StreamServer {
         var buffer: [1000]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buffer);
-        var writer = fbs.writer();
+        var path = try std.fmt.bufPrint(&buffer, "{s}/{s}", .{ self.rundir, service_name });
 
         // Allow to create a unix socket with the right permissions.
         // Group should include write permissions.
         var previous_mask = umask(0o117);
         defer _ = umask(previous_mask);
-
-        try self.server_path(service_name, writer);
-        var path = fbs.getWritten();
 
         var server = net.StreamServer.init(.{});
         var socket_addr = try net.Address.initUnix(path);
@@ -575,11 +576,8 @@ const CommunicationTestThread = struct {
         defer ctx.deinit(); // There. Can't leak. Isn't Zig wonderful?
 
         var buffer: [1000]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buffer);
-        var writer = fbs.writer();
+        var path = try std.fmt.bufPrint(&buffer, "{s}/{s}", .{ ctx.rundir, "simple-context-test" });
 
-        try ctx.server_path("simple-context-test", writer);
-        var path = fbs.getWritten();
         const socket = try net.connectUnixSocket(path);
         defer socket.close();
         _ = try socket.writer().writeAll("Hello world!");
@@ -597,10 +595,7 @@ test "Context - creation, display and memory check" {
     defer ctx.deinit(); // There. Can't leak. Isn't Zig wonderful?
 
     var buffer: [1000]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buffer);
-    var writer = fbs.writer();
-    try ctx.server_path("simple-context-test", writer);
-    var path = fbs.getWritten();
+    var path = try std.fmt.bufPrint(&buffer, "{s}/{s}", .{ ctx.rundir, "simple-context-test" });
 
     // SERVER SIDE: creating a service.
     var server = ctx.server_init("simple-context-test") catch |err| switch (err) {
@@ -637,11 +632,8 @@ const ConnectThenSendMessageThread = struct {
         var ctx = try Context.init(allocator);
         defer ctx.deinit(); // There. Can't leak. Isn't Zig wonderful?
 
-        var path_buffer: [1000]u8 = undefined;
-        var path_fbs = std.io.fixedBufferStream(&path_buffer);
-        var path_writer = path_fbs.writer();
-        try ctx.server_path("simple-context-test", path_writer);
-        var path = path_fbs.getWritten();
+        var buffer: [1000]u8 = undefined;
+        var path = try std.fmt.bufPrint(&buffer, "{s}/{s}", .{ ctx.rundir, "simple-context-test" });
 
         // Actual UNIX socket connection.
         const socket = try net.connectUnixSocket(path);
@@ -672,10 +664,7 @@ test "Context - creation, echo once" {
     defer ctx.deinit(); // There. Can't leak. Isn't Zig wonderful?
 
     var buffer: [1000]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buffer);
-    var writer = fbs.writer();
-    try ctx.server_path("simple-context-test", writer);
-    var path = fbs.getWritten();
+    var path = try std.fmt.bufPrint(&buffer, "{s}/{s}", .{ ctx.rundir, "simple-context-test" });
 
     // SERVER SIDE: creating a service.
     var server = ctx.server_init("simple-context-test") catch |err| switch (err) {
