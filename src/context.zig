@@ -234,12 +234,31 @@ pub const Context = struct {
     // Store std lib structures in the context.
     pub fn server_init(self: *Self, service_name: []const u8) !net.StreamServer {
         var buffer: [1000]u8 = undefined;
+        var buffer_lock: [1000]u8 = undefined;
         var path = try std.fmt.bufPrint(&buffer, "{s}/{s}", .{ self.rundir, service_name });
+        var lock = try std.fmt.bufPrint(&buffer_lock, "{s}.lock", .{ path });
+
+        // Create a lock file (and lock it) in order to prevent a race condition.
+        // While the program is running, the lock is enabled.
+        // Once the program stops (even if it crashes), the lock is then disabled.
+        // Quit if the lock is still active.
+        const lock_opts = .{.lock = .Exclusive, .lock_nonblocking = true};
+        _ = std.fs.createFileAbsolute(lock, lock_opts) catch |err| {
+            log.err("cannot init server at {s}, lock {s} is causing a problem: {any}", .{path, lock, err});
+            log.err("you may have lauched the service twice.", .{});
+            return err;
+        };
 
         // Allow to create a unix socket with the right permissions.
         // Group should include write permissions.
         var previous_mask = umask(0o117);
         defer _ = umask(previous_mask);
+
+        // Remove the old UNIX socket.
+        std.os.unlink(path) catch |err| switch(err) {
+            error.FileNotFound => log.debug("no unlink necessary for {s}", .{path}),
+            else => return err,
+        };
 
         var server = net.StreamServer.init(.{});
         var socket_addr = try net.Address.initUnix(path);
