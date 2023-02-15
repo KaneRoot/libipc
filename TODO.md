@@ -1,6 +1,6 @@
 ### misc
 
-- create the unix socket directory
+- handle signals using the self-pipe trick (nothing else seems better nor as portable)
 - close the connection and log when we receive too big messages
 - decide then explicitely document what the max message size should be
 - rx message buffer should be small but should grow if required
